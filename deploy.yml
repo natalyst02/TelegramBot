@@ -1,0 +1,92 @@
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: adsota-svc
+  name: gitlab-bot
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: gitlab-bot
+  template:
+    metadata:
+      labels:
+        app: gitlab-bot
+        type: app
+    spec:
+      nodeSelector:
+        node: ads
+      tolerations:
+        - key: node
+          operator: Equal
+          value: ads
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: deploy-gitlab-bot
+      volumes:
+        - name: gitlab-bot-configs
+          secret:
+            secretName: gitlab-bot-configs
+        - name: data
+          persistentVolumeClaim:
+            claimName: pvc
+      containers:
+        - name: gitlab-bot
+          image: docker.appota.com/thnt/gitlab-bot:<IMAGE_TAG>
+          volumeMounts:
+            - name: gitlab-bot-configs
+              mountPath: /.env
+              subPath: .env.prod
+              readOnly: true
+            - name: data
+              mountPath: /data
+              subPath: gitlab-bot
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512M
+            requests:
+              cpu: 100m
+              memory: 128M
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: adsota-svc
+  name: gitlab-bot
+spec:
+  ports:
+    - port: 9090
+  selector:
+    app: gitlab-bot
+  type: NodePort
+---
+# Ingress
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  namespace: adsota-svc
+  name: gitlab-bot
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: 20m
+    # nginx.ingress.kubernetes.io/rewrite-target: /$2
+  labels:
+    app: gitlab-bot
+spec:
+  rules:
+    - host: svc.adsota.com
+      http:
+        paths:
+          - path: /gitlab-bot(/|$)(.*)
+            backend:
+              serviceName: gitlab-bot
+              servicePort: 9090
+  tls:
+    - secretName: ingress-tls-svc-adsota-com
+      hosts:
+        - svc.adsota.com
